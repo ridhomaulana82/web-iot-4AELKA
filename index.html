@@ -1,12 +1,495 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Website Pertama</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>MQTT WebSocket Dashboard</title>
+
+<!-- Library MQTT -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+
+<style>
+
+:root{
+  --primary:#2563eb;
+  --success:#16a34a;
+  --danger:#dc2626;
+  --bg:#f1f5f9;
+}
+
+body{
+  font-family: system-ui, sans-serif;
+  background: var(--bg);
+  margin:0;
+  padding:30px 15px;
+  display:flex;
+  justify-content:center;
+}
+
+/* ===== CONTAINER ===== */
+
+.container{
+  width:100%;
+  max-width:800px;
+}
+
+/* ===== TITLE ===== */
+
+h2{
+  margin-top:0;
+  text-align:center;
+}
+
+/* ===== CARD ===== */
+
+.card{
+  background:#fff;
+  border-radius:10px;
+  box-shadow:0 4px 10px rgba(0,0,0,.05);
+  margin-bottom:15px;
+  overflow:hidden;
+}
+
+.card-header{
+  background:var(--primary);
+  color:#fff;
+  padding:12px;
+  cursor:pointer;
+  font-weight:600;
+}
+
+.card-content{
+  padding:15px;
+  display:none;
+}
+
+.card-content.active{
+  display:block;
+}
+
+/* ===== INPUT ===== */
+
+input,
+select,
+button{
+  width:100%;
+  padding:10px;
+  margin-bottom:10px;
+  border-radius:6px;
+  border:1px solid #ccc;
+  box-sizing:border-box;
+  font-size:15px;
+}
+
+button{
+  background:var(--primary);
+  color:white;
+  border:none;
+  cursor:pointer;
+  font-weight:600;
+}
+
+button:hover{
+  opacity:.9;
+}
+
+/* ===== STATUS ===== */
+
+#status{
+  padding:12px;
+  border-radius:8px;
+  font-weight:600;
+  margin-bottom:15px;
+  background:var(--danger);
+  color:#fff;
+  text-align:center;
+}
+
+/* ===== MESSAGE BOX ===== */
+
+#messages{
+  background:#111;
+  color:#0f0;
+  padding:10px;
+  height:220px;
+  overflow-y:auto;
+  font-family:monospace;
+  border-radius:8px;
+  font-size:14px;
+  white-space:pre-line;
+}
+
+</style>
 </head>
+
 <body>
-  <h1>Hello GitHub Pages 🚀</h1>
-  <h1>Website saya yang pertama 🎉</h1>
-  <h2>Ridho maulana 4A ELKA</h2>
-  <p>Belajar GitHub Pages itu gampang!</p>
+
+<div class="container">
+
+<h2>MQTT WebSocket Dashboard</h2>
+
+<div id="status">Not Connected</div>
+
+<!-- ================= MQTT CONFIG ================= -->
+
+<div class="card">
+
+  <div class="card-header">
+    MQTT Config
+  </div>
+
+  <div class="card-content active">
+
+    <label>Protocol</label>
+
+    <select id="protocol">
+      <option value="wss">wss</option>
+      <option value="ws">ws</option>
+    </select>
+
+    <label>Broker</label>
+
+    <input
+      type="text"
+      id="broker"
+      value="broker.emqx.io"
+    >
+
+    <label>Port</label>
+
+    <input
+      type="number"
+      id="port"
+      value="8084"
+    >
+
+    <label>Path</label>
+
+    <input
+      type="text"
+      id="path"
+      value="/mqtt"
+    >
+
+    <button id="connectBtn">
+      Connect MQTT
+    </button>
+
+  </div>
+
+</div>
+
+<!-- ================= SUBSCRIBE ================= -->
+
+<div class="card">
+
+  <div class="card-header">
+    Subscribe Topic
+  </div>
+
+  <div class="card-content">
+
+    <input
+      type="text"
+      id="subtopic"
+      placeholder="contoh: kelas/iot"
+    >
+
+    <button id="subscribeBtn">
+      Subscribe
+    </button>
+
+  </div>
+
+</div>
+
+<!-- ================= PUBLISH ================= -->
+
+<div class="card">
+
+  <div class="card-header">
+    Publish Message
+  </div>
+
+  <div class="card-content">
+
+    <input
+      type="text"
+      id="pubtopic"
+      placeholder="contoh: kelas/iot"
+    >
+
+    <input
+      type="text"
+      id="message"
+      placeholder="isi pesan mqtt"
+    >
+
+    <button id="publishBtn">
+      Send Message
+    </button>
+
+  </div>
+
+</div>
+
+<!-- ================= MESSAGES ================= -->
+
+<div class="card">
+
+  <div class="card-header">
+    MQTT Messages
+  </div>
+
+  <div class="card-content active">
+
+    <div id="messages">
+Waiting data...
+    </div>
+
+  </div>
+
+</div>
+
+</div>
+
+<!-- ================= JAVASCRIPT ================= -->
+
+<script>
+
+/* ================= SHORTCUT ================= */
+
+const $ = id => document.getElementById(id);
+
+/* ================= VARIABLE ================= */
+
+let client = null;
+let connected = false;
+
+/* ================= CARD TOGGLE ================= */
+
+document
+.querySelectorAll(".card-header")
+.forEach(header=>{
+
+  header.addEventListener("click",()=>{
+
+    header
+    .nextElementSibling
+    .classList
+    .toggle("active");
+
+  });
+
+});
+
+/* ================= LOG FUNCTION ================= */
+
+const log = text => {
+
+  const msgBox = $("messages");
+
+  const time =
+    new Date().toLocaleTimeString();
+
+  msgBox.innerHTML +=
+    `[${time}] ${text}\n`;
+
+  msgBox.scrollTop =
+    msgBox.scrollHeight;
+};
+
+/* ================= STATUS FUNCTION ================= */
+
+const setStatus = (text,type)=>{
+
+  const status = $("status");
+
+  status.textContent = text;
+
+  status.style.background =
+    type==="success"
+      ? "var(--success)"
+      : type==="danger"
+      ? "var(--danger)"
+      : "var(--primary)";
+};
+
+/* ================= CONNECT MQTT ================= */
+
+$("connectBtn")
+.addEventListener("click",()=>{
+
+  const protocol =
+    $("protocol").value;
+
+  const broker =
+    $("broker").value;
+
+  const port =
+    parseInt($("port").value);
+
+  const path =
+    $("path").value;
+
+  const clientID =
+    "web_" +
+    Math.random()
+    .toString(16)
+    .substr(2,8);
+
+  /* ===== CREATE MQTT CLIENT ===== */
+
+  client = new Paho.MQTT.Client(
+    broker,
+    port,
+    path,
+    clientID
+  );
+
+  /* ===== CONNECTION LOST ===== */
+
+  client.onConnectionLost = ()=>{
+
+    connected = false;
+
+    setStatus(
+      "Connection Lost",
+      "danger"
+    );
+
+    log("Connection lost");
+
+  };
+
+  /* ===== MESSAGE RECEIVED ===== */
+
+  client.onMessageArrived = message => {
+
+    log(
+      `Topic: ${message.destinationName}
+Payload: ${message.payloadString}`
+    );
+
+  };
+
+  /* ===== CONNECT ===== */
+
+  client.connect({
+
+    useSSL:
+      protocol === "wss",
+
+    timeout:5,
+
+    onSuccess: ()=>{
+
+      connected = true;
+
+      setStatus(
+        `Connected to ${broker}`,
+        "success"
+      );
+
+      log("MQTT Connected");
+
+    },
+
+    onFailure: err => {
+
+      connected = false;
+
+      setStatus(
+        "Connection Failed",
+        "danger"
+      );
+
+      log(
+        "Failed: " +
+        err.errorMessage
+      );
+
+    }
+
+  });
+
+});
+
+/* ================= SUBSCRIBE ================= */
+
+$("subscribeBtn")
+.addEventListener("click",()=>{
+
+  if(!connected){
+
+    alert("MQTT belum connect");
+
+    return;
+  }
+
+  const topic =
+    $("subtopic").value;
+
+  if(topic===""){
+
+    alert("Topic kosong");
+
+    return;
+  }
+
+  client.subscribe(topic);
+
+  log(
+    "Subscribed Topic: " +
+    topic
+  );
+
+});
+
+/* ================= PUBLISH ================= */
+
+$("publishBtn")
+.addEventListener("click",()=>{
+
+  if(!connected){
+
+    alert("MQTT belum connect");
+
+    return;
+  }
+
+  const topic =
+    $("pubtopic").value;
+
+  const msg =
+    $("message").value;
+
+  if(topic==="" || msg===""){
+
+    alert(
+      "Topic dan message wajib diisi"
+    );
+
+    return;
+  }
+
+  const mqttMessage =
+    new Paho.MQTT.Message(msg);
+
+  mqttMessage.destinationName =
+    topic;
+
+  client.send(mqttMessage);
+
+  log(
+    `Send Topic: ${topic}
+Message: ${msg}`
+  );
+
+});
+
+</script>
+
 </body>
 </html>
